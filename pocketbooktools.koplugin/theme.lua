@@ -8,6 +8,7 @@ local BottomContainer = require("ui/widget/container/bottomcontainer")
 local Geom = require("ui/geometry")
 local Size = require("ui/size")
 local VerticalSpan = require("ui/widget/verticalspan")
+local Utf8Proc = require("ffi/utf8proc")
 
 local PocketBookTheme = {
     BORDER_SIZE = Screen:scaleBySize(4),
@@ -94,6 +95,9 @@ end
 -- ============================================================================
 
 function PocketBookTheme:_applyTheme()
+    -- CRITICAL: Apply global font replacement FIRST
+    self:_applyGlobalFontReplacement()
+    
     -- InfoMessage
     self:_patchWidget({
         module = "ui/widget/infomessage",
@@ -113,77 +117,64 @@ function PocketBookTheme:_applyTheme()
         }
     })
     
--- ConfirmBox
-self:_patchWidget({
-    module = "ui/widget/confirmbox",
-    key = "ConfirmBox_init",
-    pre_init = function(theme, widget)
-        local screen_width = Screen:getSize().w
-        local max_width = math.floor(screen_width * theme.MAX_WIDTH_PERCENT)
-        
-        -- Calculate text width accounting for frame padding, icon, and span
-        local icon_width = theme.ICON_SIZE
-        local Size = require("ui/size")
-        local span_width = Size.span.horizontal_default
-        local frame_padding = theme.PADDING_HORIZONTAL * 2
-        
-        -- Available width for content inside frame
-        local available_content_width = max_width - frame_padding
-        
-        -- Text width = available width - icon - span - small safety margin
-        local calculated_text_width = available_content_width - icon_width - span_width - 20
-        
-        -- Override text_widget_width calculation by patching TextBoxWidget temporarily
-        local TextBoxWidget = require("ui/widget/textboxwidget")
-        if not theme._original.TextBoxWidget_new then
-            theme._original.TextBoxWidget_new = TextBoxWidget.new
-        end
-        
-        TextBoxWidget.new = function(class, o)
-            o = o or {}
-            -- Force our calculated width for ConfirmBox text
-            if o.width and o.width > calculated_text_width then
-                logger.dbg("PocketBookTheme: Limiting TextBoxWidget width from", o.width, "to", calculated_text_width)
-                o.width = calculated_text_width
+    -- ConfirmBox
+    self:_patchWidget({
+        module = "ui/widget/confirmbox",
+        key = "ConfirmBox_init",
+        pre_init = function(theme, widget)
+            local screen_width = Screen:getSize().w
+            local max_width = math.floor(screen_width * theme.MAX_WIDTH_PERCENT)
+            
+            local icon_width = theme.ICON_SIZE
+            local Size = require("ui/size")
+            local span_width = Size.span.horizontal_default
+            local frame_padding = theme.PADDING_HORIZONTAL * 2
+            local available_content_width = max_width - frame_padding
+            local calculated_text_width = available_content_width - icon_width - span_width - 20
+            
+            local TextBoxWidget = require("ui/widget/textboxwidget")
+            if not theme._original.TextBoxWidget_new then
+                theme._original.TextBoxWidget_new = TextBoxWidget.new
             end
-            return theme._original.TextBoxWidget_new(class, o)
+            
+            TextBoxWidget.new = function(class, o)
+                o = o or {}
+                if o.width and o.width > calculated_text_width then
+                    logger.dbg("PocketBookTheme: Limiting TextBoxWidget width from", o.width, "to", calculated_text_width)
+                    o.width = calculated_text_width
+                end
+                return theme._original.TextBoxWidget_new(class, o)
+            end
+            
+            widget.face = theme:_prepareFont()
+            
+            logger.dbg("PocketBookTheme: ConfirmBox widths:")
+            logger.dbg("  screen_width:", screen_width)
+            logger.dbg("  max_width:", max_width)
+            logger.dbg("  calculated_text_width:", calculated_text_width)
+        end,
+        temp_patches = {"SizeModule", "IconWidget"},
+        post_init = function(theme, widget)
+            local TextBoxWidget = require("ui/widget/textboxwidget")
+            if theme._original.TextBoxWidget_new then
+                TextBoxWidget.new = theme._original.TextBoxWidget_new
+                theme._original.TextBoxWidget_new = nil
+            end
+            theme:_styleConfirmBoxButtons(widget)
+        end,
+        frame_config = function(theme)
+            return {
+                padding = {
+                    left = theme.PADDING_HORIZONTAL,
+                    right = theme.PADDING_HORIZONTAL,
+                    top = theme.PADDING_VERTICAL,
+                    bottom = 0
+                },
+                position_at_bottom = true
+            }
         end
-        
-        widget.face = theme:_prepareFont()
-        
-        logger.dbg("PocketBookTheme: ConfirmBox widths:")
-        logger.dbg("  screen_width:", screen_width)
-        logger.dbg("  max_width:", max_width)
-        logger.dbg("  frame_padding:", frame_padding)
-        logger.dbg("  available_content_width:", available_content_width)
-        logger.dbg("  icon_width:", icon_width)
-        logger.dbg("  span_width:", span_width)
-        logger.dbg("  calculated_text_width:", calculated_text_width)
-    end,
-    temp_patches = {"SizeModule", "IconWidget"},
-    post_init = function(theme, widget)
-        -- Restore TextBoxWidget
-        local TextBoxWidget = require("ui/widget/textboxwidget")
-        if theme._original.TextBoxWidget_new then
-            TextBoxWidget.new = theme._original.TextBoxWidget_new
-            theme._original.TextBoxWidget_new = nil
-        end
-        
-        -- Style buttons
-        theme:_styleConfirmBoxButtons(widget)
-    end,
-    frame_config = function(theme)
-        return {
-            padding = {
-                left = theme.PADDING_HORIZONTAL,
-                right = theme.PADDING_HORIZONTAL,
-                top = theme.PADDING_VERTICAL,
-                bottom = 0
-            },
-            position_at_bottom = true
-        }
-    end
-})
+    })
+    
     -- ButtonDialog
     self:_patchWidget({
         module = "ui/widget/buttondialog",
@@ -201,11 +192,10 @@ self:_patchWidget({
         frame_config = {
             padding = {left = 0, right = 0, top = 0, bottom = 0},
             cleanup_content = function(content, widget)
-                -- Remove empty title_group and separator if no title
                 if not widget.title then
                     logger.dbg("PocketBookTheme: Removing empty title_group and separator")
-                    table.remove(content, 1)  -- Empty title_group
-                    table.remove(content, 1)  -- Separator
+                    table.remove(content, 1)
+                    table.remove(content, 1)
                     if content.resetLayout then
                         content:resetLayout()
                     end
@@ -221,11 +211,14 @@ self:_patchWidget({
         pre_init = function(theme, widget)
             theme:_styleButtons(widget)
         end,
-        apply_frame = false  -- ButtonTable doesn't need frame replacement
+        apply_frame = false
     })
 end
 
 function PocketBookTheme:_restoreOriginal()
+    -- Restore global fonts FIRST
+    self:_restoreGlobalFonts()
+    
     -- Restore all patched widget methods
     for key, original_method in pairs(self._original) do
         if key:match("_init$") then
@@ -233,7 +226,6 @@ function PocketBookTheme:_restoreOriginal()
                 return (c == key:sub(1,1)) and c:lower() or "_" .. c:lower()
             end)
             
-            -- Map back to actual module paths
             local module_map = {
                 info_message = "ui/widget/infomessage",
                 confirm_box = "ui/widget/confirmbox",
@@ -250,13 +242,128 @@ function PocketBookTheme:_restoreOriginal()
         end
     end
     
-    -- Clear all stored originals
     self._original = {}
-    
     logger.info("PocketBookTheme: All widgets restored to original state")
 end
 
+-- ============================================================================
+-- Global Font Replacement System
+-- ============================================================================
+
+function PocketBookTheme:_applyGlobalFontReplacement()
+    if self.FONT_FACE == "infofont" or not self.FONT_PATH then
+        logger.warn("PocketBookTheme: Roboto not available, skipping global font replacement")
+        return
+    end
+    
+    -- Create symlink for Roboto fonts
+    self:_createRobotoSymlinks()
+    
+    -- Backup original fontmap
+    if not self._original.fontmap then
+        self._original.fontmap = {}
+        for key, value in pairs(Font.fontmap) do
+            self._original.fontmap[key] = value
+        end
+        logger.dbg("PocketBookTheme: Backed up original fontmap")
+    end
+    
+    -- Replace ALL UI fonts with Roboto
+    local roboto_regular = "Roboto-Regular.ttf"
+    local roboto_bold = "Roboto-Bold.ttf"
+    
+    -- Main content fonts
+    Font.fontmap.cfont = roboto_regular
+    
+    -- Title fonts (use bold)
+    Font.fontmap.tfont = roboto_bold
+    Font.fontmap.smalltfont = roboto_bold
+    Font.fontmap.x_smalltfont = roboto_bold
+    
+    -- Footer fonts
+    Font.fontmap.ffont = roboto_regular
+    Font.fontmap.smallffont = roboto_regular
+    Font.fontmap.largeffont = roboto_regular
+    
+    -- Page fonts
+    Font.fontmap.pgfont = roboto_regular
+    
+    -- Shortcut fonts
+    Font.fontmap.scfont = roboto_regular
+    
+    -- Reader info font
+    Font.fontmap.rifont = roboto_regular
+    
+    -- Help page font
+    Font.fontmap.hpkfont = roboto_regular
+    
+    -- Header font
+    Font.fontmap.hfont = roboto_regular
+    
+    -- Info fonts (меню, диалоги, уведомления)
+    Font.fontmap.infont = roboto_regular
+    Font.fontmap.smallinfont = roboto_regular
+    Font.fontmap.infofont = roboto_regular
+    Font.fontmap.smallinfofont = roboto_regular
+    Font.fontmap.smallinfofontbold = roboto_bold
+    Font.fontmap.x_smallinfofont = roboto_regular
+    Font.fontmap.xx_smallinfofont = roboto_regular
+    
+    logger.info("PocketBookTheme: Global font replacement applied - all UI fonts set to Roboto")
+    
+    -- Log all replaced fonts
+    logger.dbg("PocketBookTheme: Font replacements:")
+    for key, value in pairs(Font.fontmap) do
+        if value == roboto_regular or value == roboto_bold then
+            logger.dbg("  ", key, "->", value)
+        end
+    end
+end
+
+function PocketBookTheme:_restoreGlobalFonts()
+    if self._original.fontmap then
+        for key, value in pairs(self._original.fontmap) do
+            Font.fontmap[key] = value
+        end
+        self._original.fontmap = nil
+        logger.info("PocketBookTheme: Global fonts restored to original")
+    end
+end
+
+function PocketBookTheme:_createRobotoSymlinks()
+    local font_dir = "./fonts"
+    
+    -- Создаём симлинки для Roboto Regular и Bold
+    local fonts_to_link = {
+        {name = "Roboto-Regular.ttf", source = self.FONT_PATH},
+        {name = "Roboto-Bold.ttf", source = self.FONT_PATH:gsub("Regular", "Bold")}
+    }
+    
+    for _, font_info in ipairs(fonts_to_link) do
+        local font_link = font_dir .. "/" .. font_info.name
+        local link_exists = io.open(font_link, "r")
+        
+        if not link_exists then
+            -- Проверяем существование исходного файла
+            local source_exists = io.open(font_info.source, "r")
+            if source_exists then
+                source_exists:close()
+                os.execute("ln -sf " .. font_info.source .. " " .. font_link)
+                logger.dbg("PocketBookTheme: Created symlink", font_link, "->", font_info.source)
+            else
+                logger.warn("PocketBookTheme: Source font not found:", font_info.source)
+            end
+        else
+            link_exists:close()
+            logger.dbg("PocketBookTheme: Symlink already exists:", font_link)
+        end
+    end
+end
+
+-- ============================================================================
 -- Universal widget patching method
+-- ============================================================================
+
 function PocketBookTheme:_patchWidget(config)
     local Widget = require(config.module)
     local key = config.key
@@ -268,12 +375,10 @@ function PocketBookTheme:_patchWidget(config)
     local theme = self
     
     Widget.init = function(widget)
-        -- Pre-initialization setup
         if config.pre_init then
             config.pre_init(theme, widget)
         end
         
-        -- Apply temporary patches
         if config.temp_patches then
             for _, patch_name in ipairs(config.temp_patches) do
                 local patch_method = "_patch" .. patch_name
@@ -283,10 +388,8 @@ function PocketBookTheme:_patchWidget(config)
             end
         end
         
-        -- Call original init
         theme._original[key](widget)
         
-        -- Remove temporary patches
         if config.temp_patches then
             for _, patch_name in ipairs(config.temp_patches) do
                 local unpatch_method = "_unpatch" .. patch_name
@@ -296,12 +399,10 @@ function PocketBookTheme:_patchWidget(config)
             end
         end
         
-        -- Post-initialization modifications
         if config.post_init then
             config.post_init(theme, widget)
         end
         
-        -- Apply themed frame
         if config.apply_frame ~= false then
             theme:_applyThemedFrame(widget, config.frame_config or {})
         end
@@ -310,15 +411,12 @@ function PocketBookTheme:_patchWidget(config)
     logger.dbg("PocketBookTheme:", config.module, "patched")
 end
 
--- Universal frame application method
 function PocketBookTheme:_applyThemedFrame(widget, config)
-    -- Resolve config if it's a function
     if type(config) == "function" then
         config = config(self)
     end
     config = config or {}
     
-    -- Find container with frame (usually movable or widget itself)
     local container = widget.movable or widget
     if not container or not container[1] then
         logger.warn("PocketBookTheme: Cannot apply themed frame - no container found")
@@ -328,12 +426,10 @@ function PocketBookTheme:_applyThemedFrame(widget, config)
     local old_frame = container[1]
     local content = old_frame[1]
     
-    -- Handle content cleanup if needed (e.g., ButtonDialog's empty spans)
     if config.cleanup_content then
         config.cleanup_content(content, widget)
     end
     
-    -- Create themed frame with provided padding or defaults
     local padding = config.padding or {
         left = self.PADDING_HORIZONTAL,
         right = self.PADDING_HORIZONTAL,
@@ -344,7 +440,6 @@ function PocketBookTheme:_applyThemedFrame(widget, config)
     local new_frame = self:_createThemedFrame(content, padding)
     container[1] = new_frame
     
-    -- Optional: position at bottom
     if config.position_at_bottom then
         self:_positionAtBottom(widget)
     end
@@ -433,26 +528,6 @@ end
 -- Helper Methods: Button Styling
 -- ============================================================================
 
--- Cyrillic uppercase conversion map
-local cyrillic_map = {
-    ['а'] = 'А', ['б'] = 'Б', ['в'] = 'В', ['г'] = 'Г', ['д'] = 'Д',
-    ['е'] = 'Е', ['ё'] = 'Ё', ['ж'] = 'Ж', ['з'] = 'З', ['и'] = 'И',
-    ['й'] = 'Й', ['к'] = 'К', ['л'] = 'Л', ['м'] = 'М', ['н'] = 'Н',
-    ['о'] = 'О', ['п'] = 'П', ['р'] = 'Р', ['с'] = 'С', ['т'] = 'Т',
-    ['у'] = 'У', ['ф'] = 'Ф', ['х'] = 'Х', ['ц'] = 'Ц', ['ч'] = 'Ч',
-    ['ш'] = 'Ш', ['щ'] = 'Щ', ['ъ'] = 'Ъ', ['ы'] = 'Ы', ['ь'] = 'Ь',
-    ['э'] = 'Э', ['ю'] = 'Ю', ['я'] = 'Я',
-}
-
-local function utf8_upper(text)
-    if not text then return text end
-    local result = string.upper(text)
-    for lower, upper in pairs(cyrillic_map) do
-        result = result:gsub(lower, upper)
-    end
-    return result
-end
-
 function PocketBookTheme:_styleButtons(button_table)
     if not button_table or not button_table.buttons then
         return
@@ -461,7 +536,8 @@ function PocketBookTheme:_styleButtons(button_table)
     for _, row in ipairs(button_table.buttons) do
         for _, btn in ipairs(row) do
             if btn.text then
-                btn.text = utf8_upper(btn.text)
+                -- Use KOReader's built-in UTF-8 uppercase function
+                btn.text = Utf8Proc.uppercase_dumb(btn.text)
             end
             if not btn.height then
                 btn.height = self.BUTTON_HEIGHT
@@ -477,10 +553,6 @@ function PocketBookTheme:_styleButtons(button_table)
     end
 end
 
--- ============================================================================
--- Helper Methods: ConfirmBox Specific
--- ============================================================================
-
 function PocketBookTheme:_styleConfirmBoxButtons(widget)
     local inner_frame_obj = widget.movable and widget.movable[1]
     if not inner_frame_obj then
@@ -492,7 +564,6 @@ function PocketBookTheme:_styleConfirmBoxButtons(widget)
         return
     end
     
-    -- Find ButtonTable
     local button_table, button_table_index
     for i = #vertical_group, 1, -1 do
         local item = vertical_group[i]
@@ -508,10 +579,8 @@ function PocketBookTheme:_styleConfirmBoxButtons(widget)
         return
     end
     
-    -- Apply button styling
     self:_styleButtons(button_table)
     
-    -- Rebuild ButtonTable with new styling
     if button_table.free then
         button_table:free()
     end
@@ -524,7 +593,6 @@ function PocketBookTheme:_styleConfirmBoxButtons(widget)
     }
     vertical_group[button_table_index] = new_button_table
     
-    -- Add VerticalSpan before ButtonTable
     if button_table_index and button_table_index > 1 then
         local prev_item = vertical_group[button_table_index - 1]
         local is_our_span = prev_item and prev_item.width == self.PADDING_VERTICAL 
