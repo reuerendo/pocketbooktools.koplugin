@@ -34,13 +34,47 @@ A KOReader plugin that syncs reading progress from KOReader to PocketBook Librar
 
 function PocketbookTools:init()
     self.ui.menu:registerToMainMenu(self)
-    -- Register widget in active widgets to receive onSuspend/onCloseDocument events
     table.insert(self.ui.active_widgets, self)
     self:resetCache()
     
-    -- Initialize theme
     local PocketBookTheme = require("theme")
     PocketBookTheme:init()
+    
+    -- Add this line:
+    self:registerSummaryAction()
+end
+
+function PocketbookTools:registerSummaryAction()
+    local Dispatcher = require("dispatcher")
+    Dispatcher:registerAction("show_book_summary", {
+        category = "none",
+        event = "ShowBookSummary",
+        title = _("Show Book Summary"),
+        general = false,
+        filemanager = false,
+        reader = true,
+    })
+end
+
+function PocketbookTools:onShowBookSummary()
+    if not self.ui.document then
+        UIManager:show(InfoMessage:new{
+            text = _("No document open"),
+            timeout = 2,
+        })
+        return true
+    end
+    
+    -- Flush settings to ensure current data is saved
+    self.ui:onFlushSettings()
+    
+    local SummaryDialog = require("summary")
+    local dialog = SummaryDialog:new{
+        ui = self.ui,
+    }
+    
+    UIManager:show(dialog)
+    return true
 end
 
 function PocketbookTools:resetCache()
@@ -66,6 +100,16 @@ function PocketbookTools:addToMainMenu(menu_items)
                     })
                 end,
                 keep_menu_open = true,
+                separator = true,
+            },
+            {
+                text = _("Show Book Summary"),
+                enabled_func = function()
+                    return self.ui.document ~= nil
+                end,
+                callback = function()
+                    self:onShowBookSummary()
+                end,
                 separator = true,
             },
             self:getCollectionMenuTable(),
