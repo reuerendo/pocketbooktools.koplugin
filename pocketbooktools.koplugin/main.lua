@@ -18,6 +18,44 @@ local inkview = ffi.load("inkview")
 local pocketbook_db_conn = SQ3.open("/mnt/ext1/system/explorer-3/explorer-3.db")
 pocketbook_db_conn:set_busy_timeout(2000)
 
+-- Cache frequently used settings keys
+local END_ACTION_KEY = "end_document_action"
+local SHOW_SUMMARY_VALUE = "show_book_summary"
+
+-- Patch for adding "Show book summary" to document end actions
+local original_dofile = dofile
+local summary_patch_applied = false
+
+_G.dofile = function(filepath)
+    local result = original_dofile(filepath)
+    
+    -- Check if we need to patch and if the target file is loaded
+    if not summary_patch_applied and filepath and filepath:match("common_settings_menu_table%.lua$") then
+        -- Verify result structure exists
+        if result and result.document_end_action and result.document_end_action.sub_item_table then
+            local sub_table = result.document_end_action.sub_item_table
+            
+            table.insert(sub_table, 2, {
+                text = _("Show book summary"),
+                checked_func = function()
+                    return G_reader_settings:readSetting(END_ACTION_KEY) == SHOW_SUMMARY_VALUE
+                end,
+                radio = true,
+                callback = function()
+                    G_reader_settings:saveSetting(END_ACTION_KEY, SHOW_SUMMARY_VALUE)
+                end,
+            })
+            summary_patch_applied = true
+            
+            logger.dbg("PocketbookTools: Successfully patched document_end_action menu")
+        else
+            logger.warn("PocketbookTools: Failed to patch document_end_action menu - structure not found")
+        end
+    end
+    
+    return result
+end
+
 local PocketbookTools = WidgetContainer:extend{
     name = "NULL;",
     is_doc_only = false,
@@ -40,8 +78,18 @@ function PocketbookTools:init()
     local PocketBookTheme = require("theme")
     PocketBookTheme:init()
     
-    -- Add this line:
     self:registerSummaryAction()
+    self:patchDocumentEndAction()
+end
+
+function PocketbookTools:patchDocumentEndAction()
+    -- Trigger patching by scheduling check
+    UIManager:scheduleIn(1, function()
+        local ReaderUI = require("apps/reader/readerui")
+        if ReaderUI.instance and ReaderUI.instance.menu then
+            logger.dbg("PocketbookTools: Triggering document end action menu patch")
+        end
+    end)
 end
 
 function PocketbookTools:registerSummaryAction()
@@ -65,8 +113,11 @@ function PocketbookTools:onShowBookSummary()
         return true
     end
     
-    -- Flush settings to ensure current data is saved
-    self.ui:onFlushSettings()
+    -- Update progress data before showing dialog
+    local sync_data = self:_prepareSync()
+    if sync_data then
+        logger.dbg("PocketbookTools: Progress data updated for summary dialog")
+    end
     
     local SummaryDialog = require("summary")
     local dialog = SummaryDialog:new{
@@ -75,6 +126,26 @@ function PocketbookTools:onShowBookSummary()
     
     UIManager:show(dialog)
     return true
+end
+
+function PocketbookTools:onEndOfBook()
+    local end_action = G_reader_settings:readSetting(END_ACTION_KEY)
+    
+    if end_action == SHOW_SUMMARY_VALUE then
+        -- Flush settings before showing summary
+        if self.ui.document then
+            self.ui:onFlushSettings()
+            
+            local Event = require("ui/event")
+            UIManager:broadcastEvent(Event:new("FlushSettings"))
+        end
+        
+        -- Show summary dialog
+        self:onShowBookSummary()
+        return true
+    end
+    
+    return false
 end
 
 function PocketbookTools:resetCache()
@@ -254,7 +325,7 @@ end
 function PocketbookTools:onCloseDocument()
     logger.dbg("PocketbookTools: onCloseDocument triggered")
     self:_handleSessionEnd("close")
-    return false -- Don't consume the event
+    return false
 end
 
 function PocketbookTools:onSuspend()
@@ -267,7 +338,7 @@ function PocketbookTools:onSuspend()
     end
     
     self:_handleSessionEnd("suspend")
-    return false -- Don't consume the event
+    return false
 end
 
 function PocketbookTools:onExit()
@@ -280,7 +351,7 @@ function PocketbookTools:onExit()
     end
     
     self:_handleSessionEnd("exit")
-    return false -- Don't consume the event
+    return false
 end
 
 function PocketbookTools:_handleSessionEnd(source)
@@ -353,14 +424,16 @@ function PocketbookTools:_prepareSync()
     local status = summary and summary.status
     local is_completed = (status == "complete" or page == total_pages) and 1 or 0
 
-    local progress_percent = 0
+    -- Save progress_ratio (0.0-1.0) instead of percent (0-100)
+    local progress_ratio = 0
     if total_pages > 0 then
-        progress_percent = math.ceil((page / total_pages) * 100)
+        progress_ratio = page / total_pages
     end
 
     -- Save progress to KOReader settings
     self.ui.doc_settings:saveSetting("pocketbook_sync_progress", {
-        percent = progress_percent,
+        ratio = progress_ratio,
+        percent = math.ceil(progress_ratio * 100),
         current_page = page,
         total_pages = total_pages,
         last_sync = os.time()

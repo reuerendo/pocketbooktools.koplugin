@@ -61,6 +61,14 @@ function SummaryDialog:init()
         }
     end
     
+    -- Load theme if available
+    self.theme = nil
+    local ok, PocketBookTheme = pcall(require, "theme")
+    if ok and PocketBookTheme and PocketBookTheme:isEnabled() then
+        self.theme = PocketBookTheme
+        logger.dbg("SummaryDialog: PocketBookTheme loaded and enabled")
+    end
+    
     self:update()
 end
 
@@ -98,17 +106,29 @@ function SummaryDialog:update()
         info_panel,
     }
     
-    -- Main frame with border and padding
-    local dialog_frame = FrameContainer:new{
-        background = Blitbuffer.COLOR_WHITE,
-        bordersize = Size.border.window,
-        padding = edge_padding,
-        padding_top = edge_padding,
-        padding_bottom = edge_padding,
-        radius = Size.radius.window,
-        width = container_width,
-        main_content,
-    }
+    -- Create frame (themed or default)
+    local dialog_frame
+    if self.theme then
+        -- Use themed frame
+        dialog_frame = self.theme:_createThemedFrame(main_content, {
+            left = edge_padding,
+            right = edge_padding,
+            top = edge_padding,
+            bottom = edge_padding
+        })
+    else
+        -- Use default frame
+        dialog_frame = FrameContainer:new{
+            background = Blitbuffer.COLOR_WHITE,
+            bordersize = Size.border.window,
+            padding = edge_padding,
+            padding_top = edge_padding,
+            padding_bottom = edge_padding,
+            radius = Size.radius.window,
+            width = container_width,
+            main_content,
+        }
+    end
     
     -- Center on screen
     self[1] = CenterContainer:new{
@@ -177,7 +197,7 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     local series = props.series
     local series_index = props.series_index
     
-    -- Get progress data - ТЕПЕРЬ ПОЛУЧАЕМ ratio ТОЖЕ
+    -- Get progress data
     local current_page, total_pages, percent, progress_ratio = self:getProgressData()
     
     logger.warn(string.format("SummaryDialog DEBUG: current_page=%s, total_pages=%s, percent=%s, ratio=%s", 
@@ -239,14 +259,13 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     }
     
     -- Progress bar (using ProgressWidget)
-    -- ИСПРАВЛЕНИЕ: используем ratio напрямую, как в cvs-receipt
     logger.warn(string.format("SummaryDialog DEBUG: progress_ratio for ProgressWidget = %.4f", 
         progress_ratio))
     
     local progress_bar = ProgressWidget:new{
         width = info_width,
         height = Size.span.vertical_default,
-        percentage = progress_ratio,  -- Используем ratio (0.0-1.0) напрямую!
+        percentage = progress_ratio,
         margin_h = 0,
         margin_v = 0,
         bordersize = 0,
@@ -311,29 +330,21 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
 end
 
 function SummaryDialog:getProgressData()
-    -- Only use pocketbook_sync_progress
     local pb_sync = self.doc_settings:readSetting("pocketbook_sync_progress")
-    
-    logger.warn("SummaryDialog DEBUG: pb_sync = " .. tostring(pb_sync))
-    
-    if pb_sync then
-        logger.warn(string.format("SummaryDialog DEBUG: pb_sync.current_page=%s, pb_sync.total_pages=%s, pb_sync.percent=%s, pb_sync.ratio=%s",
-            tostring(pb_sync.current_page), tostring(pb_sync.total_pages), tostring(pb_sync.percent), tostring(pb_sync.ratio)))
-    end
     
     if pb_sync and pb_sync.ratio then
         local current_page = pb_sync.current_page or 0
         local total_pages = pb_sync.total_pages or 0
         local percent = pb_sync.percent or 0
-        local ratio = pb_sync.ratio  -- Используем ratio для прогресс-бара
+        local ratio = pb_sync.ratio
         
-        logger.warn(string.format("SummaryDialog: Using pocketbook_sync_progress - page %d/%d (%d%%, ratio=%.4f)", 
+        logger.dbg(string.format("SummaryDialog: Using saved progress - page %d/%d (%d%%, ratio=%.4f)", 
             current_page, total_pages, percent, ratio))
         
         return current_page, total_pages, percent, ratio
     end
     
-    logger.warn("SummaryDialog: No pocketbook_sync_progress data found")
+    logger.warn("SummaryDialog: No progress data available")
     return 0, 0, 0, 0
 end
 
