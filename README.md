@@ -14,3 +14,8 @@ When shutting down the device, **a book must be open.** Otherwise, upon startup,
 For best results, combine this with the patch [2-keep-previous-screen.lua](https://github.com/reuerendo/koreader-patches) that disables the 'Open file…' notification.
 ## PocketBook Style
 My attempt to bring the appearance of some interface components (like info messages, dialog boxes, context menus) closer to the native PocketBook style. *This functionality is under active development and currently only modifies a few components.*
+
+The plugin includes a Summary widget that can be set to display automatically at the end of a book.
+
+<kbd><img src="screenshots/scr0008.jpg" width="250"></kbd>
+<kbd><img src="screenshots/scr0007.jpg" width="250"></kbd>
