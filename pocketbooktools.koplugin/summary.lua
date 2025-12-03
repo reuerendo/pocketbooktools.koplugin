@@ -177,8 +177,11 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     local series = props.series
     local series_index = props.series_index
     
-    -- Get progress data
-    local current_page, total_pages, percent = self:getProgressData()
+    -- Get progress data - ТЕПЕРЬ ПОЛУЧАЕМ ratio ТОЖЕ
+    local current_page, total_pages, percent, progress_ratio = self:getProgressData()
+    
+    logger.warn(string.format("SummaryDialog DEBUG: current_page=%s, total_pages=%s, percent=%s, ratio=%s", 
+        tostring(current_page), tostring(total_pages), tostring(percent), tostring(progress_ratio)))
     
     local widgets = {}
     
@@ -235,29 +238,21 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
         percent_widget,
     }
     
-    -- Progress bar (thin line style)
-    local read_width = math.floor(info_width * percent / 100)
-    local unread_width = info_width - read_width
+    -- Progress bar (using ProgressWidget)
+    -- ИСПРАВЛЕНИЕ: используем ratio напрямую, как в cvs-receipt
+    logger.warn(string.format("SummaryDialog DEBUG: progress_ratio for ProgressWidget = %.4f", 
+        progress_ratio))
     
-    local progress_bar = HorizontalGroup:new{
-        FrameContainer:new{
-            padding = 0,
-            margin = 0,
-            bordersize = 0,
-            background = Blitbuffer.COLOR_DARK_GRAY,
-            width = read_width,
-            height = 4,
-            VerticalSpan:new{ width = 0 },  -- Empty content
-        },
-        FrameContainer:new{
-            padding = 0,
-            margin = 0,
-            bordersize = 0,
-            background = Blitbuffer.COLOR_LIGHT_GRAY,
-            width = unread_width,
-            height = 4,
-            VerticalSpan:new{ width = 0 },  -- Empty content
-        },
+    local progress_bar = ProgressWidget:new{
+        width = info_width,
+        height = Size.span.vertical_default,
+        percentage = progress_ratio,  -- Используем ratio (0.0-1.0) напрямую!
+        margin_h = 0,
+        margin_v = 0,
+        bordersize = 0,
+        radius = 0,
+        fillcolor = Blitbuffer.COLOR_DARK_GRAY,
+        bgcolor = Blitbuffer.COLOR_LIGHT_GRAY,
     }
     
     -- Rating widget (stars)
@@ -316,28 +311,30 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
 end
 
 function SummaryDialog:getProgressData()
-    -- Try pocketbook_sync_progress first
+    -- Only use pocketbook_sync_progress
     local pb_sync = self.doc_settings:readSetting("pocketbook_sync_progress")
-    if pb_sync and pb_sync.current_page and pb_sync.total_pages and pb_sync.percent then
-        return pb_sync.current_page, pb_sync.total_pages, pb_sync.percent
+    
+    logger.warn("SummaryDialog DEBUG: pb_sync = " .. tostring(pb_sync))
+    
+    if pb_sync then
+        logger.warn(string.format("SummaryDialog DEBUG: pb_sync.current_page=%s, pb_sync.total_pages=%s, pb_sync.percent=%s, pb_sync.ratio=%s",
+            tostring(pb_sync.current_page), tostring(pb_sync.total_pages), tostring(pb_sync.percent), tostring(pb_sync.ratio)))
     end
     
-    -- Use other doc_settings fields
-    local current_page = 0
-    local total_pages = self.doc_settings:readSetting("doc_pages") or 0
-    local percent = 0
-    
-    local percent_finished = self.doc_settings:readSetting("percent_finished")
-    if percent_finished then
-        percent = math.floor(percent_finished * 100)
+    if pb_sync and pb_sync.ratio then
+        local current_page = pb_sync.current_page or 0
+        local total_pages = pb_sync.total_pages or 0
+        local percent = pb_sync.percent or 0
+        local ratio = pb_sync.ratio  -- Используем ratio для прогресс-бара
+        
+        logger.warn(string.format("SummaryDialog: Using pocketbook_sync_progress - page %d/%d (%d%%, ratio=%.4f)", 
+            current_page, total_pages, percent, ratio))
+        
+        return current_page, total_pages, percent, ratio
     end
     
-    local summary = self.doc_settings:readSetting("summary")
-    if summary and summary.percent then
-        percent = math.floor(summary.percent)
-    end
-    
-    return current_page, total_pages, percent
+    logger.warn("SummaryDialog: No pocketbook_sync_progress data found")
+    return 0, 0, 0, 0
 end
 
 function SummaryDialog:buildRatingWidget(info_width)
