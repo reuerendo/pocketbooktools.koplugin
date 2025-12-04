@@ -164,13 +164,8 @@ function PocketBookTheme:_applyTheme()
         end,
         frame_config = function(theme)
             return {
-                padding = {
-                    left = theme.PADDING_HORIZONTAL,
-                    right = theme.PADDING_HORIZONTAL,
-                    top = theme.PADDING_VERTICAL,
-                    bottom = 0
-                },
-                position_at_bottom = true
+                position_at_bottom = true,
+                confirmbox_custom_layout = true
             }
         end
     })
@@ -301,8 +296,8 @@ function PocketBookTheme:_applyGlobalFontReplacement()
     Font.fontmap.hfont = roboto_regular
     
     -- Info fonts (меню, диалоги, уведомления)
-    Font.fontmap.infont = roboto_regular
-    Font.fontmap.smallinfont = roboto_regular
+    -- Font.fontmap.infont = roboto_regular
+    -- Font.fontmap.smallinfont = roboto_regular
     Font.fontmap.infofont = roboto_regular
     Font.fontmap.smallinfofont = roboto_regular
     Font.fontmap.smallinfofontbold = roboto_bold
@@ -430,6 +425,114 @@ function PocketBookTheme:_applyThemedFrame(widget, config)
         config.cleanup_content(content, widget)
     end
     
+    -- Special handling for ConfirmBox custom layout
+    if config.confirmbox_custom_layout and content and content.align == "left" then
+        local buttons_widget = nil
+        local buttons_index = nil
+        local vspan_before_buttons = nil
+        local vspan_index = nil
+        
+        -- Find ButtonTable and VerticalSpan before it
+        for i = #content, 1, -1 do
+            local item = content[i]
+            if item and type(item) == "table" and item.buttons then
+                buttons_widget = item
+                buttons_index = i
+                if i > 1 then
+                    local prev_item = content[i - 1]
+                    if prev_item and prev_item.width and not prev_item.buttons and not prev_item.text then
+                        vspan_before_buttons = prev_item
+                        vspan_index = i - 1
+                    end
+                end
+                break
+            end
+        end
+        
+        if buttons_widget and buttons_index then
+            -- Calculate target width
+            local screen_width = Screen:getSize().w
+            local max_width = math.floor(screen_width * self.MAX_WIDTH_PERCENT)
+            local buttons_width = max_width - (self.BORDER_SIZE * 2) - 2  -- 2 for inner border
+            
+            -- Remove ButtonTable and VerticalSpan from content
+            table.remove(content, buttons_index)
+            if vspan_index then
+                table.remove(content, vspan_index)
+            end
+            
+            if content.resetLayout then
+                content:resetLayout()
+            end
+            
+            -- Recreate ButtonTable with correct width
+            if buttons_widget.free then
+                buttons_widget:free()
+            end
+            
+            local ButtonTable = require("ui/widget/buttontable")
+            local new_buttons = ButtonTable:new{
+                width = buttons_width,
+                buttons = buttons_widget.buttons,
+                zero_sep = buttons_widget.zero_sep,
+                show_parent = buttons_widget.show_parent,
+            }
+            
+            logger.dbg("PocketBookTheme: ButtonTable width set to:", buttons_width)
+            
+            -- Add horizontal padding to content
+            local HorizontalGroup = require("ui/widget/horizontalgroup")
+            local HorizontalSpan = require("ui/widget/horizontalspan")
+            local padded_content = HorizontalGroup:new{
+                align = "center",
+                HorizontalSpan:new{ width = self.PADDING_HORIZONTAL },
+                content,
+                HorizontalSpan:new{ width = self.PADDING_HORIZONTAL },
+            }
+            
+            -- Create new vertical group with padded content and full-width buttons
+            local VerticalGroup = require("ui/widget/verticalgroup")
+            local VerticalSpan = require("ui/widget/verticalspan")
+            local combined_content = VerticalGroup:new{
+                align = "left",
+                VerticalSpan:new{ width = self.PADDING_VERTICAL },
+                padded_content,
+                VerticalSpan:new{ width = self.PADDING_VERTICAL },
+                new_buttons,
+            }
+            
+            -- Create themed frame
+            local inner_radius = math.max(0, self.RADIUS - self.BORDER_SIZE)
+            local inner_frame = FrameContainer:new{
+                radius = inner_radius,
+                bordersize = 1,
+                color = Blitbuffer.COLOR_BLACK,
+                background = Blitbuffer.COLOR_WHITE,
+                padding = 0,
+                combined_content
+            }
+            
+            local outer_frame = FrameContainer:new{
+                radius = self.RADIUS,
+                bordersize = self.BORDER_SIZE,
+                color = Blitbuffer.COLOR_BLACK,
+                background = Blitbuffer.COLOR_BLACK,
+                padding = 0,
+                inner_frame,
+            }
+            
+            container[1] = outer_frame
+            
+            if config.position_at_bottom then
+                self:_positionAtBottom(widget)
+            end
+            
+            logger.dbg("PocketBookTheme: Applied ConfirmBox custom layout with full-width buttons")
+            return true
+        end
+    end
+    
+    -- Standard frame application for other widgets
     local padding = config.padding or {
         left = self.PADDING_HORIZONTAL,
         right = self.PADDING_HORIZONTAL,
