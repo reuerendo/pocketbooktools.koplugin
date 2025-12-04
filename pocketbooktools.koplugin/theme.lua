@@ -169,35 +169,37 @@ function PocketBookTheme:_applyTheme()
             }
         end
     })
-    
-    -- ButtonDialog
-    self:_patchWidget({
-        module = "ui/widget/buttondialog",
-        key = "ButtonDialog_init",
-        pre_init = function(theme, widget)
-            local screen_width = Screen:getSize().w
-            local max_width = math.floor(screen_width * theme.MAX_WIDTH_PERCENT)
-            widget.width_factor = nil
-            widget.width = max_width
-            if widget.title then
-                widget.title_face = theme:_prepareFont()
-            end
-        end,
-        temp_patches = {"SizeModule"},
-        frame_config = {
-            padding = {left = 0, right = 0, top = 0, bottom = 0},
-            cleanup_content = function(content, widget)
-                if not widget.title then
-                    logger.dbg("PocketBookTheme: Removing empty title_group and separator")
-                    table.remove(content, 1)
-                    table.remove(content, 1)
-                    if content.resetLayout then
-                        content:resetLayout()
-                    end
-                end
-            end
-        }
-    })
+
+	-- ButtonDialog
+	self:_patchWidget({
+		module = "ui/widget/buttondialog",
+		key = "ButtonDialog_init",
+		pre_init = function(theme, widget)
+			local screen_width = Screen:getSize().w
+			local max_width = math.floor(screen_width * theme.MAX_WIDTH_PERCENT)
+			widget.width_factor = nil
+			widget.width = max_width
+			if widget.title then
+				widget.title_face = theme:_prepareFont()
+			end
+			-- Set flag to skip button styling for ButtonDialog
+			widget._skip_button_styling = true
+		end,
+		temp_patches = {"SizeModule"},
+		frame_config = {
+			padding = {left = 0, right = 0, top = 0, bottom = 0},
+			cleanup_content = function(content, widget)
+				if not widget.title then
+					logger.dbg("PocketBookTheme: Removing empty title_group and separator")
+					table.remove(content, 1)
+					table.remove(content, 1)
+					if content.resetLayout then
+						content:resetLayout()
+					end
+				end
+			end
+		}
+	})
     
     -- ButtonTable (only styling, no frame)
     self:_patchWidget({
@@ -636,9 +638,12 @@ function PocketBookTheme:_styleButtons(button_table)
         return
     end
     
+    -- Check if we should skip uppercase transformation (for ButtonDialog)
+    local skip_uppercase = button_table.show_parent and button_table.show_parent._skip_button_styling
+    
     for _, row in ipairs(button_table.buttons) do
         for _, btn in ipairs(row) do
-            if btn.text then
+            if btn.text and not skip_uppercase then
                 -- Use KOReader's built-in UTF-8 uppercase function
                 btn.text = Utf8Proc.uppercase_dumb(btn.text)
             end
