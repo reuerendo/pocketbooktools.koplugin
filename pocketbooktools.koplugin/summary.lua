@@ -12,6 +12,7 @@ local HorizontalGroup = require("ui/widget/horizontalgroup")
 local HorizontalSpan = require("ui/widget/horizontalspan")
 local ImageWidget = require("ui/widget/imagewidget")
 local InputContainer = require("ui/widget/container/inputcontainer")
+local MovableContainer = require("ui/widget/container/movablecontainer") -- Добавлено
 local ProgressWidget = require("ui/widget/progresswidget")
 local Size = require("ui/size")
 local TextWidget = require("ui/widget/textwidget")
@@ -32,6 +33,7 @@ local SummaryDialog = InputContainer:extend{
     doc_settings = nil,
     document = nil,
     file_path = nil,
+    movable = nil, -- Инициализируем свойство movable
 }
 
 function SummaryDialog:init()
@@ -61,13 +63,7 @@ function SummaryDialog:init()
         }
     end
     
-    -- Load theme if available
-    self.theme = nil
-    local ok, PocketBookTheme = pcall(require, "theme")
-    if ok and PocketBookTheme and PocketBookTheme:isEnabled() then
-        self.theme = PocketBookTheme
-        logger.dbg("SummaryDialog: PocketBookTheme loaded and enabled")
-    end
+    -- УДАЛЕНО: Ручная загрузка темы. Теперь это происходит автоматически через theme.lua
     
     self:update()
 end
@@ -106,29 +102,23 @@ function SummaryDialog:update()
         info_panel,
     }
     
-    -- Create frame (themed or default)
-    local dialog_frame
-    if self.theme then
-        -- Use themed frame
-        dialog_frame = self.theme:_createThemedFrame(main_content, {
-            left = edge_padding,
-            right = edge_padding,
-            top = edge_padding,
-            bottom = edge_padding
-        })
-    else
-        -- Use default frame
-        dialog_frame = FrameContainer:new{
-            background = Blitbuffer.COLOR_WHITE,
-            bordersize = Size.border.window,
-            padding = edge_padding,
-            padding_top = edge_padding,
-            padding_bottom = edge_padding,
-            radius = Size.radius.window,
-            width = container_width,
-            main_content,
-        }
-    end
+    -- Create standard frame (Всегда создаем стандартный, theme.lua сам его изменит)
+    local dialog_frame = FrameContainer:new{
+        background = Blitbuffer.COLOR_WHITE,
+        bordersize = Size.border.window,
+        padding = edge_padding,
+        padding_top = edge_padding,
+        padding_bottom = edge_padding,
+        radius = Size.radius.window,
+        width = container_width,
+        main_content,
+    }
+    
+    -- Оборачиваем в MovableContainer.
+    -- Это ключевой момент: theme.lua ищет widget.movable, чтобы применить тему.
+    self.movable = MovableContainer:new{
+        dialog_frame
+    }
     
     -- Center on screen
     self[1] = CenterContainer:new{
@@ -136,7 +126,7 @@ function SummaryDialog:update()
             w = screen_width,
             h = screen_height,
         },
-        dialog_frame,
+        self.movable, -- Используем movable внутри CenterContainer
     }
 end
 
