@@ -556,10 +556,16 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
             return theme._original.TextBoxWidget_new(class, o)
         end
         
-        -- Temporarily override ButtonTable.new to style buttons
+        -- Temporarily override ButtonTable.new to style buttons and set full width
         ButtonTable.new = function(class, args)
             -- Style buttons before creating ButtonTable
             theme:_styleButtonsForWidget(args.buttons, "ConfirmBox")
+            
+            -- Force ButtonTable to use full available width
+            -- Calculate the width based on the inner frame dimensions
+            args.width = available_content_width
+            logger.dbg("PocketBookTheme: Set ButtonTable width to", args.width, "for ConfirmBox")
+            
             return theme._original.ButtonTable_new(class, args)
         end
         
@@ -670,6 +676,22 @@ function PocketBookTheme:_shouldApplyFrame(widget)
     return true
 end
 
+-- Check recursively if a container includes a ButtonTable
+function PocketBookTheme:_hasButtonTable(container)
+    if not container then return false end
+    
+    -- Direct check: ButtonTable instances usually have button_by_id table
+    if container.button_by_id then return true end
+    
+    -- Child check (only shallow for VerticalGroup/table)
+    if type(container) == "table" and #container > 0 then
+        for _, child in ipairs(container) do
+            if child.button_by_id then return true end
+        end
+    end
+    return false
+end
+
 function PocketBookTheme:_applyThemedFrame(widget)
     local movable = widget.movable
     if not movable or not movable[1] then
@@ -696,6 +718,16 @@ function PocketBookTheme:_applyThemedFrame(widget)
     local original_padding_right = old_frame.padding_right or original_padding
     local original_background = old_frame.background or Blitbuffer.COLOR_WHITE
     
+    -- Check if content contains a ButtonTable
+    local has_buttontable = self:_hasButtonTable(content)
+    
+    -- Determine padding for the new inner frame
+    -- If ButtonTable is present, we remove side and bottom padding from the frame
+    -- so the buttons touch the border.
+    local new_padding_left = has_buttontable and 0 or original_padding_left
+    local new_padding_right = has_buttontable and 0 or original_padding_right
+    local new_padding_bottom = has_buttontable and 0 or original_padding_bottom
+    
     -- Create inner frame
     local inner_radius = math.max(0, self.RADIUS - self.BORDER_SIZE)
     local inner_frame = FrameContainer:new{
@@ -705,9 +737,9 @@ function PocketBookTheme:_applyThemedFrame(widget)
         background = original_background,
         padding = 0,
         padding_top = original_padding_top,
-        padding_bottom = original_padding_bottom,
-        padding_left = original_padding_left,
-        padding_right = original_padding_right,
+        padding_bottom = new_padding_bottom,
+        padding_left = new_padding_left,
+        padding_right = new_padding_right,
         content
     }
     
