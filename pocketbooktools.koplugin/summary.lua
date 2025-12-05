@@ -33,7 +33,7 @@ local SummaryDialog = InputContainer:extend{
     doc_settings = nil,
     document = nil,
     file_path = nil,
-    movable = nil, -- Инициализируем свойство movable
+    movable = nil,
 }
 
 function SummaryDialog:init()
@@ -273,6 +273,7 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     -- Calculate total fixed height with static spans
     local static_span_small = Size.span.vertical_default
     local static_span_between_series = Size.span.vertical_default
+    local static_span_after_rating = Size.span.vertical_default
     
     local fixed_height = title_widget:getSize().h + static_span_small
     if series_widget then
@@ -282,6 +283,7 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     fixed_height = fixed_height + pages_line:getSize().h + static_span_small
     fixed_height = fixed_height + progress_bar:getSize().h
     fixed_height = fixed_height + rating_widget:getSize().h
+    fixed_height = fixed_height + static_span_after_rating
     fixed_height = fixed_height + Size.span.vertical_large
     fixed_height = fixed_height + status_widget:getSize().h
     
@@ -309,6 +311,8 @@ function SummaryDialog:buildInfoPanel(info_width, cover_height)
     table.insert(final_widgets, VerticalSpan:new{ width = flexible_span_height })
     
     table.insert(final_widgets, rating_widget)
+    table.insert(final_widgets, VerticalSpan:new{ width = static_span_after_rating }) -- Добавляем фиксированный спан
+    
     table.insert(final_widgets, VerticalSpan:new{ width = Size.span.vertical_large })
     
     table.insert(final_widgets, status_widget)
@@ -373,7 +377,13 @@ function SummaryDialog:buildRatingWidget(info_width)
         table.insert(stars_container, star)
     end
     
-    return stars_container
+    return CenterContainer:new{
+        dimen = Geom:new{
+            w = info_width,
+            h = stars_container:getSize().h,
+        },
+        stars_container,
+    }
 end
 
 function SummaryDialog:buildStatusWidget(info_width)
@@ -396,6 +406,7 @@ function SummaryDialog:buildStatusWidget(info_width)
         values = { 1, 2, 3, },
         enabled = true,
         config = config_wrapper,
+		font_size = 12,
     }
     
     local position = util.arrayContains(switch.args, summary.status) or 1
