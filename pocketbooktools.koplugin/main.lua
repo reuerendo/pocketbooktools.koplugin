@@ -65,7 +65,7 @@ local COLLECTION_INFO_TEXT = _([[
 The function allows you to automatically remove a book from a specified collection after reading it.]])
 
 local THEME_INFO_TEXT = _([[
-Apply PocketBook native style to dialogs and messages: thick borders (10px), rounded corners (18px), and bottom positioning.]])
+Apply PocketBook native style to dialogs and messages.]])
 
 local ABOUT_TEXT = _([[
 A KOReader plugin that syncs reading progress from KOReader to PocketBook Library.]])

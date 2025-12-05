@@ -14,6 +14,8 @@ local PocketBookTheme = {
     MAX_WIDTH_PERCENT = 0.8,
     BOTTOM_OFFSET_PERCENT = 0.1,
     ICON_SIZE = Screen:scaleBySize(120),
+    FONT_SIZE = 18,
+    TEXT_PADDING_VERTICAL = Screen:scaleBySize(24),
     
     -- Font settings - will be resolved on init
     FONT_REGULAR = nil,
@@ -174,6 +176,7 @@ function PocketBookTheme:_applyTheme()
     end
     self:_hookWidgetClasses()
     self:_hookInfoMessageAndConfirmBox()
+    self:_hookButtonTable()
     self:_hookUIManagerShow()
     logger.info("PocketBookTheme: Theme applied with fonts and widget hooks")
 end
@@ -184,6 +187,9 @@ function PocketBookTheme:_restoreOriginal()
     
     -- Restore InfoMessage and ConfirmBox
     self:_unhookInfoMessageAndConfirmBox()
+    
+    -- Restore ButtonTable
+    self:_unhookButtonTable()
     
     -- Restore widget class constructors
     for class_name, original_new in pairs(self._hooked_classes) do
@@ -233,7 +239,7 @@ function PocketBookTheme:_applyFontChanges()
         "ffont",        -- footer
         "smallfont",    -- small text
         "x_smallfont",  -- extra small text
-        "infofont",     -- info text
+        "infofont",     -- info text (used by ConfirmBox & InfoMessage)
         "smallinfofont",-- small info text
         "largefont",    -- large text
         "smalltfont",   -- small title
@@ -357,6 +363,53 @@ function PocketBookTheme:_hookWidgetClasses()
 end
 
 -- ============================================================================
+-- ButtonTable Hook
+-- ============================================================================
+
+function PocketBookTheme:_hookButtonTable()
+    local Button = require("ui/widget/button")
+    
+    -- Save original Button.new
+    if not self._original.Button_new then
+        self._original.Button_new = Button.new
+    end
+    
+    local theme = self
+    
+    -- Hook Button.new to modify button properties when created by ButtonTable
+    Button.new = function(class, args)
+        -- Check if this button is being created by ButtonTable
+        -- ButtonTable sets specific properties like bordersize = 0, margin = 0
+        if args.bordersize == 0 and args.margin == 0 then
+            -- Remove radius to eliminate rounded corners
+            args.radius = 0
+            
+            -- Ensure padding is set to 0 (ButtonTable uses padding from Size.padding.buttontable)
+            -- We override this to have no padding around buttons
+            args.padding = 0
+            args.padding_h = 0
+            args.padding_v = 0
+            
+            logger.dbg("PocketBookTheme: Modified Button - removed radius and padding")
+        end
+        
+        -- Call original constructor
+        return theme._original.Button_new(class, args)
+    end
+    
+    logger.info("PocketBookTheme: ButtonTable button styling hooked")
+end
+
+function PocketBookTheme:_unhookButtonTable()
+    if self._original.Button_new then
+        local Button = require("ui/widget/button")
+        Button.new = self._original.Button_new
+        self._original.Button_new = nil
+        logger.dbg("PocketBookTheme: Restored Button.new")
+    end
+end
+
+-- ============================================================================
 -- InfoMessage and ConfirmBox Hooks
 -- ============================================================================
 
@@ -366,6 +419,9 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
     local IconWidget = require("ui/widget/iconwidget")
     local TextBoxWidget = require("ui/widget/textboxwidget")
     local ButtonTable = require("ui/widget/buttontable")
+    local VerticalSpan = require("ui/widget/verticalspan")
+    local VerticalGroup = require("ui/widget/verticalgroup")
+    local Font = require("ui/font")
     
     -- Save originals
     if not self._original.InfoMessage_init then
@@ -393,8 +449,21 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
     local span_width = Size.span.horizontal_default or 0
     local calculated_text_width = available_content_width - icon_size - span_width - 20
     
+    -- Create custom font face with Roboto at size 18
+    local custom_face = nil
+    if self.FONT_REGULAR then
+        custom_face = Font:getFace(self.FONT_REGULAR, self.FONT_SIZE)
+        logger.dbg("PocketBookTheme: Created custom face with Roboto at size", self.FONT_SIZE)
+    end
+    
     -- Hook InfoMessage init
     InfoMessage.init = function(widget)
+        -- Override face if we have custom font
+        if custom_face then
+            widget.face = custom_face
+            logger.dbg("PocketBookTheme: Set custom face for InfoMessage")
+        end
+        
         -- Temporarily override IconWidget.new
         IconWidget.new = function(class, o)
             o = o or {}
@@ -410,6 +479,12 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         -- Temporarily override TextBoxWidget.new
         TextBoxWidget.new = function(class, o)
             o = o or {}
+            
+            -- Apply custom face if available
+            if custom_face then
+                o.face = custom_face
+            end
+            
             if o.width and o.width > calculated_text_width then
                 logger.dbg("PocketBookTheme: Limiting TextBoxWidget width from", o.width, "to", calculated_text_width, "for InfoMessage")
                 o.width = calculated_text_width
@@ -420,6 +495,26 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         -- Call original init
         theme._original.InfoMessage_init(widget)
         
+        -- Add vertical padding to the content
+        -- Structure for InfoMessage: widget.movable[1] is FrameContainer containing HorizontalGroup
+        if widget.movable and widget.movable[1] and widget.movable[1][1] then
+            local frame_container = widget.movable[1]
+            local horizontal_group = frame_container[1]
+            
+            -- Wrap HorizontalGroup in VerticalGroup with padding
+            local content_with_padding = VerticalGroup:new{
+                align = "left",
+                VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL },
+                horizontal_group,
+                VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL },
+            }
+            
+            -- Replace content in frame
+            frame_container[1] = content_with_padding
+            
+            logger.dbg("PocketBookTheme: Added vertical padding to InfoMessage content")
+        end
+        
         -- Restore IconWidget and TextBoxWidget
         IconWidget.new = theme._original.IconWidget_new
         TextBoxWidget.new = theme._original.TextBoxWidget_new
@@ -427,6 +522,12 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
     
     -- Hook ConfirmBox init
     ConfirmBox.init = function(widget)
+        -- Override face if we have custom font
+        if custom_face then
+            widget.face = custom_face
+            logger.dbg("PocketBookTheme: Set custom face for ConfirmBox")
+        end
+        
         -- Temporarily override IconWidget.new
         IconWidget.new = function(class, o)
             o = o or {}
@@ -442,6 +543,12 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         -- Temporarily override TextBoxWidget.new
         TextBoxWidget.new = function(class, o)
             o = o or {}
+            
+            -- Apply custom face if available
+            if custom_face then
+                o.face = custom_face
+            end
+            
             if o.width and o.width > calculated_text_width then
                 logger.dbg("PocketBookTheme: Limiting TextBoxWidget width from", o.width, "to", calculated_text_width, "for ConfirmBox")
                 o.width = calculated_text_width
@@ -459,13 +566,26 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         -- Call original init
         theme._original.ConfirmBox_init(widget)
         
+        -- Add vertical padding to the content group (icon + text)
+        -- Structure: widget.movable[1][1] is VerticalGroup containing content and buttons
+        if widget.movable and widget.movable[1] and widget.movable[1][1] then
+            local vertical_group = widget.movable[1][1]
+            -- Insert padding at the beginning (before content)
+            table.insert(vertical_group, 1, VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL })
+            -- Insert padding after content but before the vertical span and button table
+            -- Content is at position 2 (after our first padding), next element should be at 3
+            table.insert(vertical_group, 2 + 1, VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL })
+            vertical_group:resetLayout()
+            logger.dbg("PocketBookTheme: Added vertical padding to ConfirmBox content")
+        end
+        
         -- Restore IconWidget, TextBoxWidget and ButtonTable
         IconWidget.new = theme._original.IconWidget_new
         TextBoxWidget.new = theme._original.TextBoxWidget_new
         ButtonTable.new = theme._original.ButtonTable_new
     end
     
-    logger.info("PocketBookTheme: InfoMessage and ConfirmBox hooked with IconWidget override")
+    logger.info("PocketBookTheme: InfoMessage and ConfirmBox hooked with custom font face")
 end
 
 function PocketBookTheme:_unhookInfoMessageAndConfirmBox()
@@ -483,7 +603,7 @@ function PocketBookTheme:_unhookInfoMessageAndConfirmBox()
         logger.dbg("PocketBookTheme: Restored ConfirmBox.init")
     end
     
-    -- IconWidget, TextBoxWidget and ButtonTable are restored inside init hooks, no need to restore here
+    -- Overrides are restored inside init hooks
     if self._original.IconWidget_new then
         self._original.IconWidget_new = nil
     end
@@ -664,7 +784,7 @@ function PocketBookTheme:_styleButtonsForWidget(buttons, widget_type)
     end
     
     local Utf8Proc = require("ffi/utf8proc")
-    local button_height = Screen:scaleBySize(50)
+    local button_height = Screen:scaleBySize(60)
     
     -- Determine if we should apply uppercase (not for ButtonDialog)
     local apply_uppercase = (widget_type ~= "ButtonDialog")
