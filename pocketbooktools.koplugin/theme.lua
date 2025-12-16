@@ -495,6 +495,9 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
     local ButtonTable = self:_requireCached("ui/widget/buttontable")
     local VerticalSpan = self:_requireCached("ui/widget/verticalspan")
     local VerticalGroup = self:_requireCached("ui/widget/verticalgroup")
+    local HorizontalSpan = self:_requireCached("ui/widget/horizontalspan")
+    local HorizontalGroup = self:_requireCached("ui/widget/horizontalgroup")
+    local Size = require("ui/size")
     
     if not self._original.InfoMessage_init then
         self._original.InfoMessage_init = InfoMessage.init
@@ -514,7 +517,12 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
     
     local theme = self
     local icon_size = self.ICON_SIZE
-    local calculated_text_width = self._cached_text_width
+    local horizontal_padding = self.TEXT_PADDING_VERTICAL
+    local span_width = Size.span.horizontal_default or 0
+    
+    -- Recalculate text width accounting for one horizontal padding at the end
+    local calculated_text_width = self._cached_available_content_width - icon_size - span_width - horizontal_padding - 20
+    
     local available_content_width = self._cached_available_content_width
     local custom_face = self._cached_custom_face
     
@@ -554,12 +562,25 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         
         if widget.movable and widget.movable[1] and widget.movable[1][1] then
             local frame_container = widget.movable[1]
-            local horizontal_group = frame_container[1]
+            local old_horizontal_group = frame_container[1]
+            
+            -- Create new HorizontalGroup with trailing padding span
+            local new_horizontal_group = HorizontalGroup:new{
+                align = old_horizontal_group.align or "center",
+            }
+            
+            -- Copy all widgets from old group
+            for i = 1, #old_horizontal_group do
+                table.insert(new_horizontal_group, old_horizontal_group[i])
+            end
+            
+            -- Add trailing span only
+            table.insert(new_horizontal_group, HorizontalSpan:new{ width = horizontal_padding })
             
             local content_with_padding = VerticalGroup:new{
                 align = "left",
                 VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL },
-                horizontal_group,
+                new_horizontal_group,
                 VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL },
             }
             
@@ -614,9 +635,33 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
         theme._original.ConfirmBox_init(widget)
         
         if widget.movable and widget.movable[1] and widget.movable[1][1] then
-            local vertical_group = widget.movable[1][1]
+            local frame_container = widget.movable[1]
+            local vertical_group = frame_container[1]
+            
+            -- Get the horizontal_group (should be at position 1 after init)
+            local old_horizontal_group = vertical_group[1]
+            
+            -- Replace with new HorizontalGroup with trailing padding only
+            if old_horizontal_group and type(old_horizontal_group) == "table" then
+                local new_horizontal_group = HorizontalGroup:new{
+                    align = old_horizontal_group.align or "center",
+                }
+                
+                -- Copy all widgets from old group
+                for i = 1, #old_horizontal_group do
+                    table.insert(new_horizontal_group, old_horizontal_group[i])
+                end
+                
+                -- Add trailing span only
+                table.insert(new_horizontal_group, HorizontalSpan:new{ width = horizontal_padding })
+                
+                vertical_group[1] = new_horizontal_group
+            end
+            
+            -- Add vertical padding
             table.insert(vertical_group, 1, VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL })
             table.insert(vertical_group, 3, VerticalSpan:new{ width = theme.TEXT_PADDING_VERTICAL })
+            
             vertical_group:resetLayout()
         end
         
