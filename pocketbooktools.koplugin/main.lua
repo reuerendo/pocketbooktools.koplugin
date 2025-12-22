@@ -1,4 +1,4 @@
-local Device = require("device")
+o Device = require("device")
 
 if not Device:isPocketBook() then
     return { disabled = true, }
@@ -129,18 +129,16 @@ function PocketbookTools:onShowBookSummary()
 end
 
 function PocketbookTools:onEndOfBook()
+    self.ui:onFlushSettings()
+    
+    local Event = require("ui/event")
+    UIManager:broadcastEvent(Event:new("FlushSettings"))
+    
+    self:sync()
+    
     local end_action = G_reader_settings:readSetting(END_ACTION_KEY)
     
     if end_action == SHOW_SUMMARY_VALUE then
-        -- Flush settings before showing summary
-        if self.ui.document then
-            self.ui:onFlushSettings()
-            
-            local Event = require("ui/event")
-            UIManager:broadcastEvent(Event:new("FlushSettings"))
-        end
-        
-        -- Show summary dialog
         self:onShowBookSummary()
         return true
     end
