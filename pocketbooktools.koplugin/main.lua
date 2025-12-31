@@ -1,4 +1,4 @@
-o Device = require("device")
+Device = require("device")
 
 if not Device:isPocketBook() then
     return { disabled = true, }
@@ -638,5 +638,6 @@ function PocketbookTools:_getCurrentProfileIdCached()
     
     return self.current_profile_id
 end
+
 
 return PocketbookTools
