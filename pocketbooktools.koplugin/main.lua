@@ -639,5 +639,4 @@ function PocketbookTools:_getCurrentProfileIdCached()
     return self.current_profile_id
 end
 
-
 return PocketbookTools
