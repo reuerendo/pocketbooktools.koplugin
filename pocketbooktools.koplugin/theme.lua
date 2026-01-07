@@ -36,17 +36,19 @@ local PocketBookTheme = {
     },
     
     -- Widget classes that should be themed (consolidated list)
-    WIDGET_CLASSES = {
-        "ui/widget/infomessage",
-        "ui/widget/confirmbox",
-        "ui/widget/multiconfirmbox",
-        "ui/widget/buttondialog",
-        "ui/widget/inputdialog",
-        "ui/widget/multiinputdialog",
-        "ui/widget/dictquicklookup",
-        "ui/widget/spinwidget",
-        "ui/widget/textviewer",
-    },
+	WIDGET_CLASSES = {
+		"ui/widget/infomessage",
+		"ui/widget/confirmbox",
+		"ui/widget/multiconfirmbox",
+		"ui/widget/buttondialog",
+		"ui/widget/inputdialog",
+		"ui/widget/multiinputdialog",
+		"ui/widget/dictquicklookup",
+		"ui/widget/spinwidget",
+		"ui/widget/textviewer",
+		"ui/widget/frontlightwidget",
+		"plugins/summary.koplugin/summary", -- Add custom plugin widget
+	},
     
     _original = {},
     _enabled = false,
@@ -54,7 +56,7 @@ local PocketBookTheme = {
     _hooked_classes = {},
     _original_fontmap = {},
     _cached_modules = {},
-    _widget_types = nil, -- Cache for widget type metatables
+    _widget_types = nil,
     
     -- Cached computed values
     _cached_screen_width = nil,
@@ -214,6 +216,7 @@ function PocketBookTheme:_applyTheme()
         self:_applyFontChanges()
     end
     self:_hookWidgetClasses()
+	self:_hookFrontLightWidget()
     self:_hookInfoMessageAndConfirmBox()
     self:_hookButtonTable()
     self:_hookUIManagerShow()
@@ -250,6 +253,12 @@ function PocketBookTheme:_restoreOriginal()
         local DictQuickLookup = self:_requireCached("ui/widget/dictquicklookup")
         DictQuickLookup.init = self._original.DictQuickLookup_init
         self._original.DictQuickLookup_init = nil
+    end
+	
+    if self._original.FrontLightWidget_init then
+        local FrontLightWidget = self:_requireCached("ui/widget/frontlightwidget")
+        FrontLightWidget.init = self._original.FrontLightWidget_init
+        self._original.FrontLightWidget_init = nil
     end
     
     self._processed_widgets = setmetatable({}, {__mode = "k"})
@@ -323,6 +332,7 @@ function PocketBookTheme:_hookWidgetClasses()
         "ui/widget/buttondialog",
         "ui/widget/inputdialog",
         "ui/widget/multiinputdialog",
+        "ui/widget/frontlightwidget",
     }
     
     local max_content_width = self._cached_max_content_width
@@ -336,6 +346,7 @@ function PocketBookTheme:_hookWidgetClasses()
             self._hooked_classes[class_path] = widget_class.new
             
             widget_class.new = function(class, args)
+                args = args or {}
                 local content_width = max_content_width - (border_size * 2) - 2
                 
                 if not args.width or args.width > content_width then
@@ -352,6 +363,38 @@ function PocketBookTheme:_hookWidgetClasses()
     end
     
     self:_hookDictQuickLookup()
+end
+
+function PocketBookTheme:_hookFrontLightWidget()
+    local success, FrontLightWidget = pcall(require, "ui/widget/frontlightwidget")
+    if not success or not FrontLightWidget then
+        logger.warn("PocketBookTheme: Could not load FrontLightWidget")
+        return
+    end
+    
+    if not self._original.FrontLightWidget_init then
+        self._cached_modules["ui/widget/frontlightwidget"] = FrontLightWidget
+        self._original.FrontLightWidget_init = FrontLightWidget.init
+    end
+    
+    local theme = self
+    local max_content_width = self._cached_max_content_width
+    local border_size = self.BORDER_SIZE
+    
+    FrontLightWidget.init = function(widget_self)
+        local layout_method = getmetatable(widget_self).layout
+        
+        theme._original.FrontLightWidget_init(widget_self)
+        
+        local content_width = max_content_width - (border_size * 2) - 2
+        widget_self.width = content_width
+        widget_self.inner_width = widget_self.width - 2 * require("ui/size").padding.large
+        widget_self.button_width = math.floor(widget_self.inner_width / 4)
+        
+        layout_method(widget_self)
+    end
+    
+    logger.info("PocketBookTheme: Hooked FrontLightWidget")
 end
 
 function PocketBookTheme:_hookDictQuickLookup()
@@ -596,7 +639,7 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
             
             -- Apply padding based on widget structure
             if widget_name == "InfoMessage" then
-                -- InfoMessage structure: widget.movable[1] = frame_container, frame_container[1] = horizontal_group
+                -- InfoMessage: add padding on all sides including right
                 if widget.movable and widget.movable[1] and widget.movable[1][1] then
                     local frame_container = widget.movable[1]
                     local old_horizontal_group = frame_container[1]
@@ -616,7 +659,7 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
                     frame_container[1] = content_with_padding
                 end
             else
-                -- ConfirmBox and MultiConfirmBox structure - only add vertical padding, NO horizontal padding
+                -- ConfirmBox and MultiConfirmBox: only add vertical padding (top and bottom)
                 local container_path = {
                     ConfirmBox = function() return widget.movable and widget.movable[1] end,
                     MultiConfirmBox = function() return widget[1] and widget[1][1] and widget[1][1][1] end,
@@ -626,7 +669,7 @@ function PocketBookTheme:_hookInfoMessageAndConfirmBox()
                 if frame_container then
                     local vertical_group = frame_container[1]
                     if vertical_group then
-                        -- Only add vertical padding at top and before buttons
+                        -- Only add vertical spans, no horizontal padding
                         table.insert(vertical_group, 1, VerticalSpan:new{width = theme.TEXT_PADDING_VERTICAL})
                         table.insert(vertical_group, 3, VerticalSpan:new{width = theme.TEXT_PADDING_VERTICAL})
                         vertical_group:resetLayout()
@@ -728,13 +771,10 @@ function PocketBookTheme:_hookUIManagerShow()
         
         if should_apply then
             theme:_applyThemedFrame(widget)
-            logger.info("PocketBookTheme: Frame applied to widget:", widget_type)
         end
         
         return theme._original.UIManager_show(self_ui, widget, ...)
     end
-    
-    logger.info("PocketBookTheme: UIManager:show hooked")
 end
 
 -- OPTIMIZED: Cache widget types once and use helper function
@@ -770,105 +810,100 @@ function PocketBookTheme:_getWidgetType(widget)
     return nil
 end
 
--- Check if widget is a custom widget that should be themed (like SummaryDialog)
-function PocketBookTheme:_isCustomThemedWidget(widget)
-    -- Custom widgets have movable container and standard frame structure
-    -- This matches widgets that follow the pattern but aren't in WIDGET_CLASSES
-    if not widget.movable then
-        return false
-    end
-    
-    local movable = widget.movable
-    if not movable or not movable[1] then
-        return false
-    end
-    
-    local frame = movable[1]
-    -- Check if it's a FrameContainer with typical properties
-    local mt = getmetatable(frame)
-    if mt then
-        local FrameContainer = self:_requireCached("ui/widget/container/framecontainer")
-        if mt == FrameContainer or getmetatable(mt) == FrameContainer then
-            return true
-        end
-    end
-    
-    return false
-end
-
 function PocketBookTheme:_shouldApplyFrame(widget)
     if widget._pocketbook_themed or self._processed_widgets[widget] then
         return false
     end
     
     local widget_type = self:_getWidgetType(widget)
-    if widget_type then
-        -- Skip fullscreen InputDialog and MultiInputDialog
-        if (widget_type == "inputdialog" or widget_type == "multiinputdialog") and widget.fullscreen then
-            return false
+    
+    -- Support custom widgets with movable container
+    if not widget_type and widget.movable then
+        -- Check if it has the expected structure (movable with FrameContainer)
+        local frame = widget.movable and widget.movable[1]
+        if frame and type(frame) == "table" and frame.bordersize ~= nil then
+            return true
         end
-        return true
     end
     
-    -- Check if it's a custom widget that follows the theming pattern (like SummaryDialog)
-    return self:_isCustomThemedWidget(widget)
+    if not widget_type then
+        return false
+    end
+    
+    -- Skip fullscreen InputDialog and MultiInputDialog
+    if (widget_type == "inputdialog" or widget_type == "multiinputdialog") and widget.fullscreen then
+        return false
+    end
+    
+    return true
 end
 
 function PocketBookTheme:_applyThemedFrame(widget)
     local widget_type = self:_getWidgetType(widget)
     
-    -- If not a known widget type, check if it's a custom themed widget
-    if not widget_type then
-        if not self:_isCustomThemedWidget(widget) then
-            return false
-        end
-        -- Custom widget - use generic movable structure
-        widget_type = "custom"
-    end
-    
     -- Get movable container and frame based on widget structure
     local movable, old_frame
-    local structure_map = {
-        infomessage = function() return widget.movable, widget.movable and widget.movable[1] end,
-        confirmbox = function() return widget.movable, widget.movable and widget.movable[1] end,
-        multiconfirmbox = function() 
-            if widget[1] and widget[1][1] then
-                return widget[1][1], widget[1][1][1]
-            end
-        end,
-        buttondialog = function()
-            if widget[1] and widget[1][1] then
-                return widget[1][1], widget[1][1][1]
-            end
-        end,
-        inputdialog = function()
-            if widget[1] and widget[1][1] then
-                return widget[1][1], widget[1][1][1]
-            end
-        end,
-        multiinputdialog = function()
-            if widget[1] and widget[1][1] then
-                return widget[1][1], widget[1][1][1]
-            end
-        end,
-        dictquicklookup = function()
-            if widget[1] and widget[1][1] then
-                return widget[1][1], widget[1][1][1]
-            end
-        end,
-        spinwidget = function() return widget.movable, widget.spin_frame end,
-        textviewer = function() return widget.movable, widget.frame end,
-        custom = function() return widget.movable, widget.movable and widget.movable[1] end,
-    }
     
-    local get_structure = structure_map[widget_type]
-    if not get_structure then return false end
+    -- Check for custom plugin widgets with movable container first
+    if not widget_type and widget.movable then
+        movable = widget.movable
+        old_frame = widget.movable[1]
+        widget_type = "custom_plugin"
+    else
+        local structure_map = {
+            infomessage = function() return widget.movable, widget.movable and widget.movable[1] end,
+            confirmbox = function() return widget.movable, widget.movable and widget.movable[1] end,
+            multiconfirmbox = function() 
+                if widget[1] and widget[1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            buttondialog = function()
+                if widget[1] and widget[1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            inputdialog = function()
+                if widget[1] and widget[1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            multiinputdialog = function()
+                if widget[1] and widget[1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            dictquicklookup = function()
+                if widget[1] and widget[1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            spinwidget = function() return widget.movable, widget.spin_frame end,
+            textviewer = function() return widget.movable, widget.frame end,
+            frontlightwidget = function()
+                if widget[1] and widget[1][1] and widget[1][1][1] then
+                    return widget[1][1], widget[1][1][1]
+                end
+            end,
+            summary = function() return widget.movable, widget.movable and widget.movable[1] end,
+        }
+        
+        local get_structure = structure_map[widget_type]
+        if not get_structure then 
+            return false 
+        end
+        
+        movable, old_frame = get_structure()
+    end
     
-    movable, old_frame = get_structure()
-    if not movable or not old_frame then return false end
+    if not movable or not old_frame then 
+        return false 
+    end
     
     local content = old_frame[1]
-    if not content then return false end
+    if not content then 
+        return false 
+    end
     
     widget._pocketbook_themed = true
     self._processed_widgets[widget] = true
@@ -903,6 +938,8 @@ function PocketBookTheme:_applyThemedFrame(widget)
     if widget_type == "spinwidget" then
         widget.spin_frame = outer_frame
     elseif widget_type == "textviewer" then
+        widget.frame = outer_frame
+    elseif widget_type == "frontlightwidget" then
         widget.frame = outer_frame
     end
     
